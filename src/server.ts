@@ -2,6 +2,7 @@ import "dotenv/config";
 import app from "./app.js";
 import prisma from "./config/prisma.js";
 import redis from "./config/redis.js";
+import logger from "./config/logger.js";
 import type { Server } from "node:http";
 import { producer, consumer } from "./config/kafka.js";
 let httpServer: Server | undefined;
@@ -61,34 +62,30 @@ async function startServer(): Promise<void> {
     try {
         // 1. Connect PostgreSQL
         await prisma.$connect();
-        console.log("Database connected successfully");
-
+        logger.info("Database connected successfully")
         // 2. Connect Redis
         await redis.connect();
-        console.log("Redis connected successfully");
-
+        logger.info("Redis connected successfully")
         // 3. Initialize Kafka topics
         await ensureKafkaTopics();
-        console.log("Kafka topics initialized successfully");
+        logger.info("Kafka topics initialized successfully");
 
         // 4. Connect Kafka producer
         await producer.connect();
         producerConnected = true;
-        console.log("Kafka producer connected successfully");
-
+        logger.info("Kafka producer connected successfully")
         // 5. Connect Kafka consumer
         await consumer.connect();
         consumerConnected = true;
-        console.log("Kafka consumer connected successfully");
+        logger.info("Kafka consumer connected successfully");
 
         // 6. Start HTTP server
         httpServer = app.listen(PORT, () => {
-            console.log(`OrderFlow running on port ${PORT}`);
+            logger.info(`OrderFlow running on port ${PORT}`);
         });
 
     } catch (error) {
-        console.error("Failed to start application:", error);
-
+        logger.error({ err: error }, "Failed to start application")
         if (consumerConnected) {
             await consumer.disconnect().catch(() => {});
         }

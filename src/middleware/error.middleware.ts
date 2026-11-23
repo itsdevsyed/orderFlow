@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
+import logger from "../config/logger.js";
 
 export const errorHandler = (
     error: unknown,
@@ -22,7 +23,13 @@ export const errorHandler = (
         return;
     }
 
-    console.error("Unhandled application error:", error);
+    logger.error(
+        {
+            err: error,
+            requestId: res.getHeader("X-Request-ID")
+        },
+        "Unhandled application error"
+    );
 
     res.status(500).json({
         success: false,
