@@ -15,6 +15,11 @@ app.get("/health", (req, res) => {
     });
 });
 
+
+
+
+
+
 app.get("/health/database", async (req, res) => {
     try {
         await prisma.$queryRaw`SELECT 1`;
