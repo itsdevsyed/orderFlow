@@ -1,46 +1,82 @@
 import "dotenv/config";
+
+import type { Server } from "node:http";
+
 import app from "./app.js";
 import prisma from "./config/prisma.js";
 import redis from "./config/redis.js";
 import logger from "./config/logger.js";
-import type { Server } from "node:http";
 import { producer, consumer } from "./config/kafka.js";
-let httpServer: Server | undefined;
 import { ensureKafkaTopics } from "./config/kafka-topics.js";
-const PORT = process.env.PORT || 3000;
+
+const PORT = Number(process.env.PORT || 3000);
+
+let httpServer: Server | undefined;
+
+let prismaConnected = false;
+let redisConnected = false;
+let producerConnected = false;
+let consumerConnected = false;
+
+let isShuttingDown = false;
 
 async function shutdown(signal: string): Promise<void> {
-    console.log(`${signal} received. Shutting down...`);
+    logger.info({ signal }, "Shutdown signal received");
 
     if (httpServer) {
         const server = httpServer;
         httpServer = undefined;
 
-        await new Promise<void>((resolve) => {
-            server.close(() => resolve());
+        await new Promise<void>((resolve, reject) => {
+            server.close((error) => {
+                if (error) {
+                    reject(error);
+                } else {
+                    resolve();
+                }
+            });
         });
+
+        logger.info("HTTP server closed successfully");
     }
 
-    if (redis.status === "ready") {
-        await redis.quit();
-    } else {
-        redis.disconnect();
+    const cleanupTasks: Promise<unknown>[] = [];
+
+    if (consumerConnected) {
+        cleanupTasks.push(consumer.disconnect());
+        consumerConnected = false;
     }
 
-    await producer.disconnect();
-    console.log("Kafka producer disconnected successfully");
+    if (producerConnected) {
+        cleanupTasks.push(producer.disconnect());
+        producerConnected = false;
+    }
 
-    await consumer.disconnect();
-    console.log("Kafka consumer disconnected successfully");
+    if (redisConnected) {
+        cleanupTasks.push(redis.quit());
+        redisConnected = false;
+    }
 
-    await prisma.$disconnect();
+    if (prismaConnected) {
+        cleanupTasks.push(prisma.$disconnect());
+        prismaConnected = false;
+    }
 
-    console.log("OrderFlow shut down successfully");
+    const results = await Promise.allSettled(cleanupTasks);
+
+    results.forEach((result) => {
+        if (result.status === "rejected") {
+            logger.error(
+                { err: result.reason },
+                "Resource cleanup failed"
+            );
+        }
+    });
+
+    logger.info("OrderFlow shut down successfully");
 
     process.exit(0);
 }
-
-let isShuttingDown = false;
 
 function handleShutdown(signal: string): void {
     if (isShuttingDown) return;
@@ -48,58 +84,83 @@ function handleShutdown(signal: string): void {
     isShuttingDown = true;
 
     void shutdown(signal).catch((error) => {
-        console.error("Shutdown failed:", error);
+        logger.fatal({ err: error }, "Shutdown failed");
         process.exit(1);
     });
 }
 
 process.on("SIGTERM", () => handleShutdown("SIGTERM"));
 process.on("SIGINT", () => handleShutdown("SIGINT"));
-async function startServer(): Promise<void> {
-    let producerConnected = false;
-    let consumerConnected = false;
 
+async function startServer(): Promise<void> {
     try {
         // 1. Connect PostgreSQL
         await prisma.$connect();
-        logger.info("Database connected successfully")
+        prismaConnected = true;
+
+        logger.info("Database connected successfully");
+
         // 2. Connect Redis
         await redis.connect();
-        logger.info("Redis connected successfully")
+        redisConnected = true;
+
+        logger.info("Redis connected successfully");
+
         // 3. Initialize Kafka topics
         await ensureKafkaTopics();
+
         logger.info("Kafka topics initialized successfully");
 
         // 4. Connect Kafka producer
         await producer.connect();
         producerConnected = true;
-        logger.info("Kafka producer connected successfully")
+
+        logger.info("Kafka producer connected successfully");
+
         // 5. Connect Kafka consumer
         await consumer.connect();
         consumerConnected = true;
+
         logger.info("Kafka consumer connected successfully");
 
         // 6. Start HTTP server
         httpServer = app.listen(PORT, () => {
-            logger.info(`OrderFlow running on port ${PORT}`);
+            logger.info(
+                { port: PORT },
+                "OrderFlow running"
+            );
         });
 
     } catch (error) {
-        logger.error({ err: error }, "Failed to start application")
+        logger.fatal(
+            { err: error },
+            "Failed to start application"
+        );
+
+        const cleanupTasks: Promise<unknown>[] = [];
+
         if (consumerConnected) {
-            await consumer.disconnect().catch(() => {});
+            cleanupTasks.push(consumer.disconnect());
         }
 
         if (producerConnected) {
-            await producer.disconnect().catch(() => {});
+            cleanupTasks.push(producer.disconnect());
         }
 
-        redis.disconnect();
+        if (redisConnected) {
+            cleanupTasks.push(redis.quit());
+        } else {
+            redis.disconnect();
+        }
 
-        await prisma.$disconnect().catch(() => {});
+        if (prismaConnected) {
+            cleanupTasks.push(prisma.$disconnect());
+        }
+
+        await Promise.allSettled(cleanupTasks);
 
         process.exit(1);
     }
 }
 
-startServer();
+startServer();  

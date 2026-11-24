@@ -9,7 +9,7 @@ services:
     restart: unless-stopped
 
     ports:
-      - "3000:3000"
+      - "3000:4000"
 
     env_file:
       - .env
@@ -28,6 +28,36 @@ services:
     networks:
       - orderflow-network
 
+
+  #prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: orderflow-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    networks:
+      - orderflow-network
+
+#grafana
+  grafana:
+    image: grafana/grafana:latest
+    container_name: orderflow-grafana
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - orderflow-network
 
   # Redis
   redis:
@@ -128,6 +158,10 @@ services:
       - orderflow-network
 
 
+
+
+
+
 networks:
   orderflow-network:
     driver: bridge
@@ -136,3 +170,5 @@ networks:
 volumes:
   redis-data:
   kafka-data:
+  prometheus-data:
+  grafana-data:

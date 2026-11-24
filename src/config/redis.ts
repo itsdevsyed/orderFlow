@@ -1,4 +1,5 @@
 import Redis from "ioredis";
+import logger from "./logger.js";
 
 const redisUrl = process.env.REDIS_URL;
 
@@ -9,25 +10,26 @@ if (!redisUrl) {
 const redis = new Redis(redisUrl, {
     lazyConnect: true,
     maxRetriesPerRequest: 3,
+
     retryStrategy(times) {
         return Math.min(times * 500, 5000);
     }
 });
 
 redis.on("connect", () => {
-    console.log("Redis connection established");
+    logger.info("Redis connection established");
 });
 
 redis.on("ready", () => {
-    console.log("Redis is ready to accept commands");
+    logger.info("Redis is ready to accept commands");
 });
 
 redis.on("error", (error) => {
-    console.error("Redis connection error:", error.message);
+    logger.error({ err: error }, "Redis connection error");
 });
 
 redis.on("close", () => {
-    console.log("Redis connection closed");
+    logger.warn("Redis connection closed");
 });
 
 export default redis;

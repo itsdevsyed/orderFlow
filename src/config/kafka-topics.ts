@@ -1,4 +1,5 @@
 import kafka from "./kafka.js";
+import logger from "./logger.js";
 
 const admin = kafka.admin();
 
@@ -9,7 +10,7 @@ export async function ensureKafkaTopics(): Promise<void> {
         const existingTopics = await admin.listTopics();
 
         if (existingTopics.includes("order-events")) {
-            console.log("Kafka topic order-events already exists");
+            logger.info("Kafka topic order-events already exists");
             return;
         }
 
@@ -24,7 +25,8 @@ export async function ensureKafkaTopics(): Promise<void> {
             ]
         });
 
-        console.log("Kafka topic order-events created successfully");
+        logger.info("Kafka topic order-events created successfully");
+
     } finally {
         await admin.disconnect();
     }
